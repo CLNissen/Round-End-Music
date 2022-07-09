@@ -12,6 +12,8 @@ bool SamePath = false;
 char sSectionName[255];
 char sSongName[255];
 char sAuthor[255];
+char finalSongName[255];
+char finalAuthorName[255];
 
 
 
@@ -151,7 +153,36 @@ public Action CS_OnTerminateRound(float &delay, CSRoundEndReason &reason)
 	
 	if(Success) {
 		PlayMusicAll(szSound);
-
+		
+		char section[100];
+		Format(section, sizeof(section), "%s", szSound[1]);
+		
+		char sPath[PLATFORM_MAX_PATH];
+		Format(sPath, sizeof(sPath), "configs/abner_res.txt");
+		BuildPath(Path_SM, sPath, sizeof(sPath), sPath);
+	
+		if (!FileExists(sPath))
+		{
+			SetFailState("File doesn't exist");
+		}
+			
+	
+		KeyValues kv = CreateKeyValues("Abner Res");
+		if (!kv.ImportFromFile(sPath)) 
+		{
+			SetFailState("Cant find file", sPath);
+		}	
+			
+		if (!kv.JumpToKey(section))
+		{
+			delete kv;
+			PrintToServer("Couldn't find sectionname");
+			PrintToServer(section);
+		}
+		
+		kv.GetString("songname", finalSongName, sizeof(finalSongName));
+		kv.GetString("author", finalAuthorName, sizeof(finalAuthorName));
+		
 		if(GetConVarInt(g_hStop) == 1)
 			StopMapMusic();
 
@@ -467,7 +498,7 @@ public Action Event_RoundEnd(Event event, const char[] name, bool dontBroadcast)
 {
 	
 	char displayString[1024];
-	Format(displayString, sizeof(displayString), "<b><span class='fontSize-xxl' color='#00FFEC'>%s</span> <span class='fontSize-xxl' color='#FFFFFF'> - </span> <span class='fontSize-xxl' color='#FA0000'>%s</span></b>", sSongName, sAuthor);
+	Format(displayString, sizeof(displayString), "<b><span class='fontSize-xxl' color='#00FFEC'>%s</span> <span class='fontSize-xxl' color='#FFFFFF'> - </span> <span class='fontSize-xxl' color='#FA0000'>%s</span></b>", finalSongName, finalAuthorName);
 		
 	Event res_event_message = CreateEvent("cs_win_panel_round");
 	res_event_message.SetString("funfact_token", displayString);
