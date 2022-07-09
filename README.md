@@ -9,3 +9,5 @@ Same requirements as AbNeR Res : https://forums.alliedmods.net/showthread.php?p=
 # Versions
 
 v.1.0 = Initial release
+
+v.1.1 = Bug Fixes
