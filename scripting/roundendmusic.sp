@@ -3,29 +3,19 @@
 #include <colors>
 #include <clientprefs>
 #include <cstrike>
+bool soundLib;
 #include <abnersound>
-
-
-bool SamePath = false;
-
-
-char sSectionName[255];
-char sSongName[255];
-char sAuthor[255];
-char finalSongName[255];
-char finalAuthorName[255];
-
-
 
 #pragma newdecls required
 #pragma semicolon 1
 #define PLUGIN_VERSION "1.1"
 
+char sSectionName[255];
+char sSongName[255];
+char sAuthor[255];
 
 //Cvars
-ConVar g_hCTPath;
-ConVar g_hTRPath;
-ConVar g_hDrawPath;
+ConVar g_hGlobalSoundPath;
 ConVar g_hPlayType;
 ConVar g_hStop;
 ConVar g_PlayPrint;
@@ -33,15 +23,14 @@ ConVar g_ClientSettings;
 ConVar g_SoundVolume;
 ConVar g_playToTheEnd;
 
-
+//Handles
 Handle g_ResPlayCookie;
 Handle g_ResVolumeCookie;
 
 //Sounds Arrays
-ArrayList ctSoundsArray;
-ArrayList trSoundsArray;
-ArrayList drawSoundsArray;
+ArrayList globalSoundsArray;
 StringMap soundNames;
+StringMap soundAuthors;
 
 public Plugin myinfo =
 {
@@ -57,14 +46,12 @@ public void OnPluginStart()
 	//Cvars
 	CreateConVar("abner_res_version", PLUGIN_VERSION, "Plugin version", FCVAR_NOTIFY|FCVAR_REPLICATED);
 	
-	g_hTRPath                  = CreateConVar("res_tr_path", "csgo/addons/sourcemod/data/music", "Path of sounds played when Terrorists Win the round");
-	g_hCTPath                  = CreateConVar("res_ct_path", "csgo/addons/sourcemod/data/music", "Path of sounds played when Counter-Terrorists Win the round");
-	g_hDrawPath				   = CreateConVar("res_draw_path", "1", "Path of sounds played when Round Draw or 0 - Don´t play sounds, 1 - Play TR sounds, 2 - Play CT sounds");
+	g_hGlobalSoundPath         = CreateConVar("res_global_sound_path", "csgo/addons/sourcemod/data/music", "Path of sounds played when any team wins the round");
 		
 	g_hPlayType                = CreateConVar("res_play_type", "1", "1 - Random, 2 - Play in queue");
 	g_hStop                    = CreateConVar("res_stop_map_music", "1", "Stop map musics");	
 	
-	g_PlayPrint                = CreateConVar("res_print_to_chat_mp3_name", "1", "Print mp3 name in chat (Suggested by m22b)");
+	g_PlayPrint                = CreateConVar("res_print_to_chat_mp3_name", "1", "Print mp3 name in scoreboard position");
 	g_ClientSettings	       = CreateConVar("res_client_preferences", "1", "Enable/Disable client preferences");
 
 	g_SoundVolume 			   = CreateConVar("res_default_volume", "0.75", "Default sound volume.");
@@ -81,7 +68,7 @@ public void OnPluginStart()
 	AutoExecConfig(true);
 
 	/* CMDS */
-	RegAdminCmd("res_refresh", CommandLoad, ADMFLAG_SLAY);
+	RegAdminCmd("res_refresh", CommandLoad, ADMFLAG_ROOT);
 	RegConsoleCmd("res", abnermenu);
 		
 	
@@ -91,139 +78,12 @@ public void OnPluginStart()
 	
 	soundLib = (GetFeatureStatus(FeatureType_Native, "GetSoundLengthFloat") == FeatureStatus_Available);
 
-	ctSoundsArray = new ArrayList(512);
-	trSoundsArray = new ArrayList(512);
-	drawSoundsArray = new ArrayList(512);
+	globalSoundsArray = new ArrayList(512);
 	soundNames = new StringMap();
-	
-	
+	soundAuthors = new StringMap();
+
+	OnMapStart();
 }
-
-stock bool IsValidClient(int client)
-{
-	if(client <= 0 ) return false;
-	if(client > MaxClients) return false;
-	if(!IsClientConnected(client)) return false;
-	return IsClientInGame(client);
-}
-
-int TRWIN[] = {0, 3, 8, 12, 17, 18};
-int CTWIN[] = {4, 5, 6, 7, 10, 11, 13, 16, 19};
-
-bool IsCTReason(int reason) {
-	for(int i = 0;i<sizeof(CTWIN);i++)
-		if(CTWIN[i] == reason) return true;
-
-	return false;
-}
-
-bool IsTRReason(int reason) {
-	for(int i = 0;i<sizeof(TRWIN);i++)
-		if(TRWIN[i] == reason) return true;
-
-	return false;
-}
-
-int GetWinner(int reason) {
-	if(IsTRReason(reason))
-		return 2;
-
-	if(IsCTReason(reason))
-		return 3;
-
-	return 0;
-}
-
-
-
-public Action CS_OnTerminateRound(float &delay, CSRoundEndReason &reason)
-{
-	int winner = GetWinner(view_as<int>(reason));
-	bool random = GetConVarInt(g_hPlayType) == 1;
-
-	char szSound[128];
-
-	bool Success = false;
-	if((winner == CS_TEAM_CT && SamePath) || winner == CS_TEAM_T) 
-		Success = GetSound(trSoundsArray, g_hTRPath, random, szSound, sizeof(szSound));
-	else if(winner == CS_TEAM_CT) 
-		Success = GetSound(ctSoundsArray, g_hCTPath, random, szSound, sizeof(szSound));
-	else 
-		Success = GetSound(drawSoundsArray, g_hDrawPath, random, szSound, sizeof(szSound));
-	
-	if(Success) {
-		PlayMusicAll(szSound);
-		
-		char section[100];
-		Format(section, sizeof(section), "%s", szSound[1]);
-		
-		char sPath[PLATFORM_MAX_PATH];
-		Format(sPath, sizeof(sPath), "configs/abner_res.txt");
-		BuildPath(Path_SM, sPath, sizeof(sPath), sPath);
-	
-		if (!FileExists(sPath))
-		{
-			SetFailState("File doesn't exist");
-		}
-			
-	
-		KeyValues kv = CreateKeyValues("Abner Res");
-		if (!kv.ImportFromFile(sPath)) 
-		{
-			SetFailState("Cant find file", sPath);
-		}	
-			
-		if (!kv.JumpToKey(section))
-		{
-			delete kv;
-			PrintToServer("Couldn't find sectionname");
-			PrintToServer(section);
-		}
-		
-		kv.GetString("songname", finalSongName, sizeof(finalSongName));
-		kv.GetString("author", finalAuthorName, sizeof(finalAuthorName));
-		
-		if(GetConVarInt(g_hStop) == 1)
-			StopMapMusic();
-
-		if(GetConVarBool(g_playToTheEnd) && soundLib) {
-			float length = soundLenght(szSound);
-			delay = length;
-			return Plugin_Changed;
-		}
-	}
-
-	return Plugin_Continue;
-}
-
-
-void PlayMusicAll(char[] szSound)
-{
-	for (int i = 1; i <= MaxClients; i++)
-	{
-		if(IsValidClient(i) && (GetConVarInt(g_ClientSettings) == 0 || GetIntCookie(i, g_ResPlayCookie) == 0))
-		{
-			float selectedVolume = GetClientVolume(i);
-			PlaySoundClient(i, szSound, selectedVolume);
-		}
-	}
-	
-	if(GetConVarInt(g_PlayPrint) == 1)
-	{
-		char soundKey[100];
-		char soundPrint[512];
-		char buffer[20][255];
-		
-		int numberRetrieved = ExplodeString(szSound, "/", buffer, sizeof(buffer), sizeof(buffer[]), false);
-		if (numberRetrieved > 0)
-			Format(soundKey, sizeof(soundKey), buffer[numberRetrieved - 1]);
-		
-		soundNames.GetString(soundKey, soundPrint, sizeof(soundPrint));
-						
-		CPrintToChatAll("{green}[HjemEZEZ Music] {default}%t", "mp3 print", !StrEqual(soundPrint, "") ? soundPrint : szSound);
-	}
-}
-
 
 public void Event_RoundStart(Handle event, const char[] name, bool dontBroadcast)
 {
@@ -231,6 +91,68 @@ public void Event_RoundStart(Handle event, const char[] name, bool dontBroadcast
 	{
 		MapSounds();
 	}
+}
+
+public Action Event_RoundEnd(Event event, const char[] name, bool dontBroadcast)
+{
+	bool random = GetConVarInt(g_hPlayType) == 1;
+
+	char szSound[128];
+
+	bool Success = false;
+	Success = GetSound(globalSoundsArray, g_hGlobalSoundPath, random, szSound, sizeof(szSound));
+	
+	if(Success) {
+		PlayMusicAll(szSound);
+		
+		if(GetConVarInt(g_hStop) == 1)
+		{
+			StopMapMusic();
+		}
+
+		if(GetConVarBool(g_playToTheEnd) && soundLib) {
+			return Plugin_Changed;
+		}
+	}
+
+	return Plugin_Continue;
+}
+
+void PlayMusicAll(char[] szSound)
+{
+	char soundKey[100];
+	char buffer[20][255];
+	char soundName[512];
+	char soundAuthor[512];
+
+	int numberRetrieved = ExplodeString(szSound, "/", buffer, sizeof(buffer), sizeof(buffer[]), false);
+	if (numberRetrieved > 0)
+	{
+		Format(soundKey, sizeof(soundKey), buffer[numberRetrieved - 1]);
+	}
+	soundNames.GetString(soundKey, soundName, sizeof(soundName));
+	soundAuthors.GetString(soundKey, soundAuthor, sizeof(soundAuthor));
+
+	char displayString[1024];
+	Format(displayString, sizeof(displayString), "<b><span class='fontSize-xxl' color='#00FFEC'>%s</span> <span class='fontSize-xxl' color='#FFFFFF'> - </span> <span class='fontSize-xxl' color='#FA0000'>%s</span></b>", soundName, soundAuthor);
+
+	Event res_event_message = CreateEvent("cs_win_panel_round");
+	res_event_message.SetString("funfact_token", displayString);
+
+	for (int i = 1; i <= MaxClients; i++)
+	{
+		if(IsValidClient(i) && (GetConVarInt(g_ClientSettings) == 0 || GetIntCookie(i, g_ResPlayCookie) == 0))
+		{
+			if(GetConVarInt(g_PlayPrint) == 1)
+			{
+				res_event_message.FireToClient(i);
+			}
+			float selectedVolume = GetClientVolume(i);
+			PlaySoundClient(i, szSound, selectedVolume);
+		}
+	}
+
+	res_event_message.Cancel();
 }
 
 public void SoundCookieHandler(int client, CookieMenuAction action, any info, char[] buffer, int maxlen)
@@ -252,6 +174,8 @@ public Action msg(Handle timer, any client)
 	{
 		CPrintToChat(client, "{default}{green}[HjemEZEZ Music] {default}%t", "JoinMsg");
 	}
+
+	return Plugin_Handled;
 }
 
 public Action abnermenu(int client, int args)
@@ -329,9 +253,7 @@ public int AbNeRMenuHandler(Handle menu, MenuAction action, int client, int para
 	return 0;
 }
 
-void VolumeMenu(int client){
-	
-
+void VolumeMenu(int client) {
 	float volumeArray[] = { 1.0, 0.75, 0.50, 0.25, 0.10 };
 	float selectedVolume = GetClientVolume(client);
 
@@ -356,7 +278,7 @@ void VolumeMenu(int client){
 	volumeMenu.Display(client, MENU_TIME_FOREVER);
 }
 
-public int VolumeMenuHandler(Menu menu, MenuAction action, int client, int param2)
+int VolumeMenuHandler(Menu menu, MenuAction action, int client, int param2)
 {
 	if(action == MenuAction_Select){
 		char sInfo[10];
@@ -372,6 +294,8 @@ public int VolumeMenuHandler(Menu menu, MenuAction action, int client, int param
 	{
 		delete menu;
 	}
+
+	return 0;
 }
 
 
@@ -382,51 +306,10 @@ public void OnMapStart()
 
 void RefreshSounds(int client)
 {
-	char trSoundPath[PLATFORM_MAX_PATH];
-	char ctSoundPath[PLATFORM_MAX_PATH];
-	char drawSoundPath[PLATFORM_MAX_PATH];
+	char globalSoundPath[PLATFORM_MAX_PATH];
 	
-	GetConVarString(g_hTRPath, trSoundPath, sizeof(trSoundPath));
-	GetConVarString(g_hCTPath, ctSoundPath, sizeof(ctSoundPath));
-	GetConVarString(g_hDrawPath, drawSoundPath, sizeof(drawSoundPath));
-		
-	SamePath = StrEqual(trSoundPath, ctSoundPath);
-
-	if(SamePath)
-	{
-		ReplyToCommand(client, "[HjemEZEZ Music] SOUNDS: %d sounds loaded from \"sound/%s\"", LoadSounds(trSoundsArray, g_hTRPath), trSoundPath);
-	}
-	else
-	{
-		ReplyToCommand(client, "[HjemEZEZ Music] CT SOUNDS: %d sounds loaded from \"sound/%s\"", LoadSounds(ctSoundsArray, g_hCTPath), ctSoundPath);
-		ReplyToCommand(client, "[HjemEZEZ Music] TR SOUNDS: %d sounds loaded from \"sound/%s\"", LoadSounds(trSoundsArray, g_hTRPath), trSoundPath);
-	}
-	
-	int RoundDrawOption = GetConVarInt(g_hDrawPath);
-	if(RoundDrawOption != 0)
-		switch(RoundDrawOption)
-		{
-			case 1:
-			{
-				drawSoundsArray = trSoundsArray;
-				g_hDrawPath = g_hTRPath;
-				ReplyToCommand(client, "[HjemEZEZ Music] DRAW SOUNDS: %d sounds loaded from \"sound/%s\"", trSoundsArray.Length, trSoundPath);
-			}
-			case 2:
-			{
-				drawSoundsArray = ctSoundsArray;
-				g_hDrawPath = g_hCTPath;
-				ReplyToCommand(client, "[HjemEZEZ Music] DRAW SOUNDS: %d sounds loaded from \"sound/%s\"", ctSoundsArray.Length, ctSoundPath);
-			}
-			default:
-			{
-				char drawSoundsPath[PLATFORM_MAX_PATH];
-				GetConVarString(g_hDrawPath, drawSoundsPath, sizeof(drawSoundsPath));
-				
-				if(!StrEqual(drawSoundsPath, ""))
-					ReplyToCommand(client, "[HjemEZEZ Music] DRAW SOUNDS: %d sounds loaded from \"sound/%s\"", LoadSounds(drawSoundsArray, g_hDrawPath), drawSoundsPath);
-			}
-		}
+	GetConVarString(g_hGlobalSoundPath, globalSoundPath, sizeof(globalSoundPath));
+	ReplyToCommand(client, "[HjemEZEZ Music] SOUNDS: %d sounds loaded from \"sound/%s\"", LoadSounds(globalSoundsArray, g_hGlobalSoundPath), globalSoundPath);
 	
 	ParseSongNameKvFile();
 }
@@ -435,6 +318,7 @@ void RefreshSounds(int client)
 public void ParseSongNameKvFile()
 {
 	soundNames.Clear();
+	soundAuthors.Clear();
 
 	char sPath[PLATFORM_MAX_PATH];
 	Format(sPath, sizeof(sPath), "configs/abner_res.txt");
@@ -460,18 +344,27 @@ public void ParseSongNameKvFile()
 		
 			
 			soundNames.SetString(sSectionName, sSongName);
+			soundAuthors.SetString(sSectionName, sAuthor);
 		}
 		while(hKeyValues.GotoNextKey(false));
 	}
 	hKeyValues.Close();
 }
- 
-
 
 public Action CommandLoad(int client, int args)
 {   
 	RefreshSounds(client);
 	return Plugin_Handled;
+}
+
+/* Helpers */
+stock bool IsValidClient(int client)
+{
+	if(client <= 0 ) return false;
+	if(client > MaxClients) return false;
+	if(!IsClientConnected(client)) return false;
+	if(IsFakeClient(client)) return false;
+	return IsClientInGame(client);
 }
 
 float GetClientVolume(int client){
@@ -492,27 +385,3 @@ int GetIntCookie(int client, Handle handle)
 	GetClientCookie(client, handle, sCookieValue, sizeof(sCookieValue));
 	return StringToInt(sCookieValue);
 }
-
-
-public Action Event_RoundEnd(Event event, const char[] name, bool dontBroadcast)
-{
-	
-	char displayString[1024];
-	Format(displayString, sizeof(displayString), "<b><span class='fontSize-xxl' color='#00FFEC'>%s</span> <span class='fontSize-xxl' color='#FFFFFF'> - </span> <span class='fontSize-xxl' color='#FA0000'>%s</span></b>", finalSongName, finalAuthorName);
-		
-	Event res_event_message = CreateEvent("cs_win_panel_round");
-	res_event_message.SetString("funfact_token", displayString);
-
-	for(int z = 1; z <= MaxClients; z++)
-       	{
-       	if(IsClientInGame(z) && !IsFakeClient(z))
-       		{
-       			res_event_message.FireToClient(z);
-			}
-      	}
-	res_event_message.Cancel();
-    
-	return Plugin_Continue;
-	
-}
-
